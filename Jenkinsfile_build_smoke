@@ -30,17 +30,17 @@ pipeline{
         }
         stage("Run (Docker)"){
             steps{
-
+                echo "------"
             }
         }
         stage("smoke test"){
             steps{
-
+                echo "------"
             }
         }
         stage("Archive Artifacts"){
             steps{
-                
+                echo "------"
             }
         }
     }
