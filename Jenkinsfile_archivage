@@ -16,6 +16,7 @@ pipeline {
         stage("Checkout") {
             steps {
                 echo "Source code checked out from Git"
+                bat 'git fetch --tags'
             }
         }
 
@@ -26,22 +27,22 @@ pipeline {
                 bat 'docker --version'
                 bat 'if not exist artifacts mkdir artifacts'
 
-                
-script {
-    def version = bat(
-        script: 'git describe --tags --abbrev=0',
-        returnStdout: true
-    ).trim()
+                script {
+                    def version = bat(
+                        script: '@git describe --tags --abbrev=0',
+                        returnStdout: true
+                    ).trim()
 
-    if (!(version ==~ /v\d+\.\d+\.\d+/)) {
-        error "Invalid version tag. Expected format: vX.Y.Z"
-    }
+                    echo "TAG DETECTED: [${version}]"
 
-    env.TAG_NAME = version
+                    if (!(version ==~ /^v\d+\.\d+\.\d+$/)) {
+                        error "Invalid version tag. Expected format: vX.Y.Z. Detected: ${version}"
+                    }
 
-    echo "Version detected: ${env.TAG_NAME}"
-}
+                    env.TAG_NAME = version
 
+                    echo "Version detected: ${env.TAG_NAME}"
+                }
             }
         }
 
@@ -81,7 +82,7 @@ script {
                     echo "Parallel syntax checks completed"
 
                     // Build versioned Docker image
-                    bat 'docker build -t taskflow:%TAG_NAME% . > artifacts\\build.log 2>&1'
+                    bat "docker build -t taskflow:${env.TAG_NAME} . > artifacts\\build.log 2>&1"
 
                     echo "Versioned Docker image built successfully"
                 }
@@ -91,7 +92,7 @@ script {
         // 4. RUN DOCKER
         stage("Run (Docker)") {
             steps {
-                bat 'docker run -d --name taskflow-%BUILD_NUMBER% -p 8082:80 taskflow:%TAG_NAME%'
+                bat "docker run -d --name taskflow-%BUILD_NUMBER% -p 8082:80 taskflow:${env.TAG_NAME}"
 
                 echo "Versioned TaskFlow container started"
             }
@@ -146,7 +147,7 @@ script {
         // 6. ARCHIVE ARTIFACTS
         stage("Archive Artifacts") {
             steps {
-                bat 'docker save taskflow:%TAG_NAME% -o artifacts\\taskflow-%TAG_NAME%.tar'
+                bat "docker save taskflow:${env.TAG_NAME} -o artifacts\\taskflow-${env.TAG_NAME}.tar"
 
                 bat 'docker logs taskflow-%BUILD_NUMBER% > artifacts\\docker.log 2>&1'
 
