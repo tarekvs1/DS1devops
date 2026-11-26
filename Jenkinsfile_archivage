@@ -10,30 +10,38 @@ pipeline {
         PATH = "C:\\Users\\ademk\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
     }
 
-    
-stage("Setup") {
-    steps {
-        bat 'node --version'
-        bat 'docker --version'
+    stages {
 
-        bat 'if not exist artifacts mkdir artifacts'
-
-        script {
-            def version = bat(
-                script: 'git describe --tags --exact-match HEAD',
-                returnStdout: true
-            ).trim()
-
-            if (!(version ==~ /v\\d+\\.\\d+\\.\\d+/)) {
-                error "Invalid version tag. Expected format: vX.Y.Z"
+        // 1. CHECKOUT
+        stage("Checkout") {
+            steps {
+                echo "Source code checked out from Git"
             }
-
-            env.TAG_NAME = version
-
-            echo "Valid version: ${env.TAG_NAME}"
         }
-    }
-}
+
+        // 2. SETUP
+        stage("Setup") {
+            steps {
+                bat 'node --version'
+                bat 'docker --version'
+                bat 'if not exist artifacts mkdir artifacts'
+
+                script {
+                    def version = bat(
+                        script: 'git describe --tags --exact-match HEAD',
+                        returnStdout: true
+                    ).trim()
+
+                    if (!(version ==~ /v\d+\.\d+\.\d+/)) {
+                        error "Invalid version tag. Expected format: vX.Y.Z"
+                    }
+
+                    env.TAG_NAME = version
+
+                    echo "Valid version: ${env.TAG_NAME}"
+                }
+            }
+        }
 
         // 3. BUILD
         stage("Build") {
@@ -71,7 +79,7 @@ stage("Setup") {
                     echo "Parallel syntax checks completed"
 
                     // Build versioned Docker image
-                    bat "docker build -t taskflow:${env.TAG_NAME} . > artifacts\\build.log 2>&1"
+                    bat 'docker build -t taskflow:%TAG_NAME% . > artifacts\\build.log 2>&1'
 
                     echo "Versioned Docker image built successfully"
                 }
@@ -81,14 +89,14 @@ stage("Setup") {
         // 4. RUN DOCKER
         stage("Run (Docker)") {
             steps {
-                bat "docker run -d --name taskflow-${env.BUILD_NUMBER} -p 8082:80 taskflow:${env.TAG_NAME}"
+                bat 'docker run -d --name taskflow-%BUILD_NUMBER% -p 8082:80 taskflow:%TAG_NAME%'
 
                 echo "Versioned TaskFlow container started"
             }
         }
 
         // 5. SMOKE TEST
-        stage("smoke test") {
+        stage("Smoke Test") {
             steps {
                 script {
                     def result = powershell(
@@ -136,11 +144,17 @@ stage("Setup") {
         // 6. ARCHIVE ARTIFACTS
         stage("Archive Artifacts") {
             steps {
-                bat "docker save taskflow:${env.TAG_NAME} -o artifacts\\taskflow-${env.TAG_NAME}.tar"
+                bat 'docker save taskflow:%TAG_NAME% -o artifacts\\taskflow-%TAG_NAME%.tar'
 
-                bat "docker logs taskflow-%BUILD_NUMBER% > artifacts\\docker.log 2>&1"
+                bat 'docker logs taskflow-%BUILD_NUMBER% > artifacts\\docker.log 2>&1'
 
-                echo "Versioned Docker image exported successfully"
+                archiveArtifacts(
+                    artifacts: 'artifacts/*',
+                    fingerprint: true,
+                    allowEmptyArchive: true
+                )
+
+                echo "Versioned Docker image exported and artifacts archived"
             }
         }
     }
@@ -148,7 +162,7 @@ stage("Setup") {
     post {
         always {
             script {
-                // Save Docker logs
+                // Save Docker logs if available
                 bat '''
                     docker logs taskflow-%BUILD_NUMBER% > artifacts\\docker.log 2>&1 || echo Container logs unavailable > artifacts\\docker.log
                 '''
@@ -161,14 +175,14 @@ TASKFLOW VERSIONED BUILD REPORT
 Job Name: ${env.JOB_NAME}
 Build Number: ${env.BUILD_NUMBER}
 Build URL: ${env.BUILD_URL}
-Version Tag: ${env.TAG_NAME}
+Version Tag: ${env.TAG_NAME ?: 'Not detected'}
 Build Result: ${currentBuild.currentResult}
 
 Artifacts:
 - build.log
 - smoke-test.txt
 - docker.log
-- taskflow-${env.TAG_NAME}.tar
+- taskflow-${env.TAG_NAME ?: 'unknown'}.tar
 - pipeline-report.txt
 """
 
@@ -177,7 +191,7 @@ Artifacts:
                     text: report
                 )
 
-                // Archive all artifacts
+                // Archive artifacts even if a stage fails
                 archiveArtifacts(
                     artifacts: 'artifacts/*',
                     fingerprint: true,
