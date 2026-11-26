@@ -26,20 +26,22 @@ pipeline {
                 bat 'docker --version'
                 bat 'if not exist artifacts mkdir artifacts'
 
-                script {
-                    def version = bat(
-                        script: 'git describe --tags --exact-match HEAD',
-                        returnStdout: true
-                    ).trim()
+                
+script {
+    def version = bat(
+        script: 'git describe --tags --abbrev=0',
+        returnStdout: true
+    ).trim()
 
-                    if (!(version ==~ /v\d+\.\d+\.\d+/)) {
-                        error "Invalid version tag. Expected format: vX.Y.Z"
-                    }
+    if (!(version ==~ /v\d+\.\d+\.\d+/)) {
+        error "Invalid version tag. Expected format: vX.Y.Z"
+    }
 
-                    env.TAG_NAME = version
+    env.TAG_NAME = version
 
-                    echo "Valid version: ${env.TAG_NAME}"
-                }
+    echo "Version detected: ${env.TAG_NAME}"
+}
+
             }
         }
 
