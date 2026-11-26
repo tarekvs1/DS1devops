@@ -12,18 +12,22 @@ pipeline {
 
     stages {
 
+        // 1. CHECKOUT
         stage("Checkout") {
             steps {
-                echo "Source code already checked out in Jenkins configuration"
+                checkout scm
+                echo "Source code checked out successfully"
             }
         }
 
+        // 2. SETUP
         stage("Setup") {
             steps {
                 bat 'node --version'
                 bat 'docker --version'
 
                 bat 'if not exist artifacts mkdir artifacts'
+
                 bat 'echo Build stage not started yet > artifacts\\build.log'
                 bat 'echo NOT RUN > artifacts\\smoke-test.txt'
 
@@ -31,9 +35,12 @@ pipeline {
             }
         }
 
+        // 3. BUILD
         stage("Build") {
             steps {
                 script {
+
+                    // Verify application files
                     if (!fileExists("index.html")) {
                         error "index.html does not exist"
                     }
@@ -63,24 +70,34 @@ pipeline {
 
                     parallel checks
 
-                    echo "JavaScript syntax checks passed on all Node.js versions"
+                    echo "JavaScript syntax checks passed on Node.js 22 and 24"
+
+                    // Build Docker image
+                    bat 'docker build -t taskflow:%BUILD_NUMBER% . > artifacts\\build.log 2>&1'
+
+                    echo "Docker image built successfully"
                 }
             }
         }
 
+        // 4. RUN DOCKER
         stage("Run (Docker)") {
             steps {
-                bat 'docker build -t taskflow:%BUILD_NUMBER% . > artifacts\\build.log 2>&1'
+                // Remove an old container with the same name if it exists
+                bat 'docker rm -f taskflow-%BUILD_NUMBER% 2>nul || exit /b 0'
 
+                // Start the application
                 bat 'docker run -d --name taskflow-%BUILD_NUMBER% -p 8082:80 taskflow:%BUILD_NUMBER%'
 
-                echo "TaskFlow Docker container started"
+                echo "TaskFlow Docker container started successfully"
             }
         }
 
+        // 5. SMOKE TEST
         stage("Smoke Test") {
             steps {
                 script {
+
                     def result = powershell(
                         returnStatus: true,
                         script: '''
@@ -123,19 +140,33 @@ pipeline {
             }
         }
 
+        // 6. ARCHIVE ARTIFACTS
         stage("Archive Artifacts") {
             steps {
                 bat 'docker logs taskflow-%BUILD_NUMBER% > artifacts\\docker.log 2>&1'
 
                 echo "Docker logs saved successfully"
+
+                archiveArtifacts(
+                    artifacts: 'artifacts/*',
+                    fingerprint: true,
+                    allowEmptyArchive: true
+                )
+
+                echo "Artifacts archived successfully"
             }
         }
     }
 
     post {
+
         always {
             script {
-                // Save Docker logs even if an earlier stage failed
+
+                // Make sure artifacts directory exists
+                bat 'if not exist artifacts mkdir artifacts'
+
+                // Save Docker logs even if a previous stage failed
                 bat '''
                     docker logs taskflow-%BUILD_NUMBER% > artifacts\\docker.log 2>&1 || echo Container logs unavailable > artifacts\\docker.log
                 '''
@@ -153,6 +184,18 @@ Build Result: ${currentBuild.currentResult}
 Pipeline: Build & Smoke
 Application: TaskFlow
 
+Stages:
+- Checkout
+- Setup
+- Build
+- Run (Docker)
+- Smoke Test
+- Archive Artifacts
+
+Parallel Checks:
+- Node.js 22
+- Node.js 24
+
 Artifacts:
 - build.log
 - smoke-test.txt
@@ -165,7 +208,7 @@ Artifacts:
                     text: report
                 )
 
-                // Archive artifacts in all cases
+                // Archive all artifacts
                 archiveArtifacts(
                     artifacts: 'artifacts/*',
                     fingerprint: true,
