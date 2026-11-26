@@ -1,9 +1,14 @@
 
 pipeline {
     agent any
+
+    options {
+        disableConcurrentBuilds()
+    }
+
     environment {
-    PATH = "C:\\Users\\ademk\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
-}
+        PATH = "C:\\Users\\ademk\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
+    }
 
     stages {
 
@@ -17,6 +22,11 @@ pipeline {
             steps {
                 bat 'node --version'
                 bat 'docker --version'
+
+                bat 'if not exist artifacts mkdir artifacts'
+                bat 'echo Build stage not started yet > artifacts\\build.log'
+                bat 'echo NOT RUN > artifacts\\smoke-test.txt'
+
                 echo "Environment verification completed"
             }
         }
@@ -41,15 +51,29 @@ pipeline {
                     }
 
                     echo "All application files are available"
+
+                    // Parallel JavaScript syntax checks
+                    def checks = [:]
+
+                    ["22", "24"].each { version ->
+                        checks["Node.js ${version}"] = {
+                            bat "docker run --rm -v \"%WORKSPACE%:/app\" -w /app node:${version}-alpine node --check script.js"
+                        }
+                    }
+
+                    parallel checks
+
+                    echo "JavaScript syntax checks passed on all Node.js versions"
                 }
             }
         }
 
         stage("Run (Docker)") {
             steps {
-                bat 'docker build -t taskflow:%BUILD_NUMBER% .'
+                bat 'docker build -t taskflow:%BUILD_NUMBER% . > artifacts\\build.log 2>&1'
 
                 bat 'docker run -d --name taskflow-%BUILD_NUMBER% -p 8082:80 taskflow:%BUILD_NUMBER%'
+
                 echo "TaskFlow Docker container started"
             }
         }
@@ -57,8 +81,6 @@ pipeline {
         stage("Smoke Test") {
             steps {
                 script {
-                    bat 'if not exist artifacts mkdir artifacts'
-
                     def result = powershell(
                         returnStatus: true,
                         script: '''
@@ -81,12 +103,12 @@ pipeline {
 
                             if ($success) {
                                 "PASSED - TaskFlow application is responding correctly" |
-                                    Out-File -FilePath "artifacts/smoke-test.txt"
+                                    Out-File -FilePath "artifacts/smoke-test.txt" -Encoding utf8
                                 exit 0
                             }
                             else {
                                 "FAILED - TaskFlow application is not responding" |
-                                    Out-File -FilePath "artifacts/smoke-test.txt"
+                                    Out-File -FilePath "artifacts/smoke-test.txt" -Encoding utf8
                                 exit 1
                             }
                         '''
@@ -105,20 +127,57 @@ pipeline {
             steps {
                 bat 'docker logs taskflow-%BUILD_NUMBER% > artifacts\\docker.log 2>&1'
 
-                archiveArtifacts(
-                    artifacts: 'artifacts/*',
-                    fingerprint: true
-                )
-
-                echo "Artifacts archived successfully"
+                echo "Docker logs saved successfully"
             }
         }
     }
 
     post {
         always {
+            script {
+                // Save Docker logs even if an earlier stage failed
+                bat '''
+                    docker logs taskflow-%BUILD_NUMBER% > artifacts\\docker.log 2>&1 || echo Container logs unavailable > artifacts\\docker.log
+                '''
+
+                // Generate pipeline report
+                def report = """
+BUILD AND SMOKE PIPELINE REPORT
+================================
+
+Job Name: ${env.JOB_NAME}
+Build Number: ${env.BUILD_NUMBER}
+Build URL: ${env.BUILD_URL}
+Build Result: ${currentBuild.currentResult}
+
+Pipeline: Build & Smoke
+Application: TaskFlow
+
+Artifacts:
+- build.log
+- smoke-test.txt
+- docker.log
+- pipeline-report.txt
+"""
+
+                writeFile(
+                    file: 'artifacts/pipeline-report.txt',
+                    text: report
+                )
+
+                // Archive artifacts in all cases
+                archiveArtifacts(
+                    artifacts: 'artifacts/*',
+                    fingerprint: true,
+                    allowEmptyArchive: true
+                )
+            }
+
+            // Docker cleanup
             bat 'docker rm -f taskflow-%BUILD_NUMBER% 2>nul || exit /b 0'
+
             echo "Docker cleanup completed"
+            echo "Artifacts archived"
         }
 
         success {
