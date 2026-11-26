@@ -3,17 +3,29 @@ pipeline{
     stages{
         stage("Checkout"){
             steps{
-
+                echo "Source code already checked out in jenkins configuration, check screenshots"
             }
         }
         stage("Setup"){
             steps{
-                
+                bat 'node --version'
+                /*to verify the javascript files*/
             }
         }
         stage("Build"){
             steps{
-                
+                script{
+                    if(!fileExists("index.html")){
+                        error "index.html doesnt exists"
+                    }
+                    if(!fileExists("style.css")){
+                        error "style.css doesnt exists"
+                    }
+                    if(!fileExists("script.js")){
+                        error "script.js doesnt exists"
+                    }
+                    echo "all files are available"
+                }
             }
         }
         stage("Run (Docker)"){
