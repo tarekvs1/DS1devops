@@ -10,34 +10,30 @@ pipeline {
         PATH = "C:\\Users\\ademk\\AppData\\Local\\Programs\\DockerDesktop\\resources\\bin;${env.PATH}"
     }
 
-    stages {
+    
+stage("Setup") {
+    steps {
+        bat 'node --version'
+        bat 'docker --version'
 
-        // 1. CHECKOUT
-        stage("Checkout") {
-            steps {
-                echo "Source code checked out from GitHub"
-                echo "Versioned Build Pipeline"
-                echo "Git Tag: ${env.TAG_NAME}"
+        bat 'if not exist artifacts mkdir artifacts'
+
+        script {
+            def version = bat(
+                script: 'git describe --tags --exact-match HEAD',
+                returnStdout: true
+            ).trim()
+
+            if (!(version ==~ /v\\d+\\.\\d+\\.\\d+/)) {
+                error "Invalid version tag. Expected format: vX.Y.Z"
             }
+
+            env.TAG_NAME = version
+
+            echo "Valid version: ${env.TAG_NAME}"
         }
-
-        // 2. SETUP
-        stage("Setup") {
-            steps {
-                bat 'node --version'
-                bat 'docker --version'
-
-                bat 'if not exist artifacts mkdir artifacts'
-
-                script {
-                    if (!env.TAG_NAME || !(env.TAG_NAME ==~ /v\\d+\\.\\d+\\.\\d+/)) {
-                        error "Invalid version tag. Expected format: vX.Y.Z"
-                    }
-
-                    echo "Valid version: ${env.TAG_NAME}"
-                }
-            }
-        }
+    }
+}
 
         // 3. BUILD
         stage("Build") {
